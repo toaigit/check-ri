@@ -1,0 +1,57 @@
+#!/bin/bash
+#  Alert Notification of expiring reserved instances.
+#  usage: check-ri
+#
+TMPFILE=/tmp/describe-ri.out
+TMPFILE2=/tmp/expiring-ri.log
+CURDATE=`date +%s`
+SUBJECT="WARNING: Reserved Instance expire soon"
+RCPT="toaivo@stanford.edu"
+
+#  Linux day in seconds
+ONEDATE=86400
+
+#  Number of days left before sending out the alert
+WARNING=7
+
+#  Empty the file 
+:> $TMPFILE2
+
+aws ec2 describe-reserved-instances --query  \
+    'ReservedInstances[?State == `active`].[State,Start,InstanceType,End,ReservedInstancesId]' --output text > $TMPFILE
+
+if [ ! -s $TMPFILE ] ; then 
+   echo "INFO: No reserved instance found." > $TMPFILE
+   mailx -s "INFO: No reserved instance found" $RCPT < $TMPFILE
+   rm $TMPFILE
+   exit 1
+fi
+
+# Checking Active Reserved Instances ....
+cat $TMPFILE | while read inrec
+do
+  state=`echo $inrec | awk '{print $1}'`
+  startdate=`echo $inrec | awk '{print $2}'`
+  instType=`echo $inrec | awk '{print $3}'`
+  enddate=`echo $inrec | awk '{print $4}'`
+  reservedID=`echo $inrec | awk '{print $5}'`
+
+  ENDDATE=`date -d $enddate +%s`
+  datediff=`expr $ENDDATE - $CURDATE`
+
+  days=`echo "$datediff / $ONEDATE" | bc`
+
+  if [ $days -le $WARNING ] ; then
+     echo "Reserved ID: $reservedID, instType: $instType, State: $state, EndOn: $enddate, DAYS: $days" >> $TMPFILE2
+  fi
+
+done
+
+#  Send Notification 
+if [ -s $TMPFILE2 ] ; then
+  cat $TMPFILE2
+  mailx -s "$SUBJECT" $RCPT < $TMPFILE2 
+fi
+
+# clean up
+rm $TMPFILE1 $TMPFILE2
